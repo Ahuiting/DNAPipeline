@@ -167,7 +167,7 @@ rule picard:
 
     shell:
         "mkdir -p {params.outdir} &&"
-        "picard MarkDuplicates REMOVE_DUPLICATES=true I={input} O={output.file} M={output.metrics} "
+        "picard MarkDuplicates REMOVE_DUPLICATES=true I={input} O={output.file} M={output.metrics} CREATE_INDEX=true "
         ">{log} 2>&1"
     
    
