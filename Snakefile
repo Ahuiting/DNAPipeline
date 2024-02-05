@@ -119,7 +119,7 @@ rule bwa:
     shell:
         "mkdir -p {params.outdir} &&"
         #"bwa-mem2 index {input.genome}&& "
-        "bwa-mem2 mem -t {threads} {input.genome} {input.R1} {input.R2} > {output.file} "
+        "bwa-mem2 mem -M -t {threads} {input.genome} {input.R1} {input.R2} > {output.file} "
         "2>{log} && "
         "samtools stats {output.file} >{output.stats}"
 
