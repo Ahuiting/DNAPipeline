@@ -1,5 +1,4 @@
 import os
-#import pandas as pd
 shell.executable("bash")
 
 from snakemake.utils import min_version
