@@ -2,7 +2,7 @@ import os
 shell.executable("bash")
 
 from snakemake.utils import min_version
-
+min_version("8.10.6")
 
 configfile: "config.yaml"
 log_dir = config['output_dir'] + "/logs"
@@ -22,10 +22,12 @@ def get_paired_fastq(wildcards):
         raise ValueError(f"Error in matched pairs {wildcards.sample}")
         
 
+
     
 rule all:
     input:
-        config['output_dir']+"/multiqc/multiqc.html"
+        config['output_dir']+"/multiqc/multiqc.html",
+        config['output_dir']+"/multiqc/QC_table.csv"
         
 
     
@@ -41,7 +43,8 @@ rule fastqc:
         log_dir+"/fastqc/{sample}.log",
 
     params:
-        outdir=working_dir+"/fastqc"
+        outdir=working_dir+"/fastqc",
+        rm_files=working_dir+"/fastqc/*_fastqc.html"
         
     threads: 32
        
@@ -50,7 +53,8 @@ rule fastqc:
       
     shell:
         "mkdir -p {params.outdir} &&"
-        "fastqc --threads {threads} {input} --outdir {params.outdir} >{log} 2>&1"
+        "fastqc --threads {threads} {input} --outdir {params.outdir} >{log} 2>&1 &&"
+        "rm {params.rm_files}"
 
        
 
@@ -65,7 +69,8 @@ rule trim:
         log=log_dir+"/trimmed/{sample}.log"
 
     params:
-        outdir=working_dir+"/trimmed/{sample}"
+        outdir=working_dir+"/trimmed/{sample}",
+        rm_files=working_dir+"/trimmed/{sample}/*_fastqc.html"
        
     threads: 32
     
@@ -73,9 +78,10 @@ rule trim:
         "envs/trim_galore.yml"
        
     shell:
-        "mkdir -p {params.outdir} &&"
+        "mkdir -p {params.outdir} && "
         "trim_galore --paired {input} --fastqc --output_dir {params.outdir} --cores {threads} "
-        ">{output.log} 2>&1"
+        ">{output.log} 2>&1 && "
+        "rm {params.rm_files}"
 
 
         
@@ -104,13 +110,12 @@ rule bwa_index:
         ">{log} 2>&1"
 
 
-
 rule bwa:
     input:
         R1=working_dir+"/trimmed/{sample}/{sample}_R1_001_val_1.fq.gz",
         R2=working_dir+"/trimmed/{sample}/{sample}_R2_001_val_2.fq.gz",
         genome=working_dir+"/bwa_index/"+ref_genome_name
-
+        
     output:
         file=working_dir+"/bwa/{sample}.bam",
         stats=working_dir+"/bwa/{sample}.txt"
@@ -127,39 +132,16 @@ rule bwa:
         "envs/bwa.yml"
 
     shell:
-        "mkdir -p {params.outdir} &&"
-        "bwa-mem2 mem -M -t {threads} {input.genome} {input.R1} {input.R2} > {output.file} "
-        "2>{log} && "
+        "mkdir -p {params.outdir} && "
+        "bwa-mem2 mem -M -t {threads} -R $(bash get_RG.sh {input.R1}) {input.genome} {input.R1} {input.R2} | samtools sort -@{threads} | samtools view -b -F 256 -f 2 -o {output.file} "# keep only paired mapped reads
+        ">{log} 2>&1 && "
         "samtools stats {output.file} >{output.stats}"
 
-   
-rule samtools:
-    input:
-        working_dir+"/bwa/{sample}.bam",
 
-    output:
-        file=working_dir+"/samtools/{sample}.bam",
-        
-    log:
-        log_dir+"/samtools/{sample}.log"
-        
-    params:
-        outdir=working_dir+"/samtools"
-        
-    threads: 32
-        
-    conda:
-        "envs/samtools.yml"  
-
-    shell:
-        "mkdir -p {params.outdir} &&"
-        "samtools sort --threads {threads} -o {output.file} {input} "
-        ">{log} 2>&1"
-        
         
 rule picard:
     input:
-        working_dir+"/samtools/{sample}.bam",
+        working_dir+"/bwa/{sample}.bam",
 
     output:
         file=working_dir+"/picard/{sample}_deduplicated.bam",
@@ -180,6 +162,7 @@ rule picard:
         ">{log} 2>&1"
    
     
+    
 rule multiqc:
     input: 
         expand(working_dir+"/fastqc/{sample}_fastqc.zip",
@@ -193,10 +176,10 @@ rule multiqc:
         expand(working_dir+"/picard/{sample}_deduplicated.metrics.txt",
                sample=PE_SAMPLES),
                
-       
-     
+          
     output:
-        config['output_dir']+"/multiqc/multiqc.html"
+        html=config['output_dir']+"/multiqc/multiqc.html",
+        folder=directory(config['output_dir']+"/multiqc/multiqc_data")
         
     log:
         log_dir+"/multiqc/multiqc.log"
@@ -208,7 +191,15 @@ rule multiqc:
         "envs/multiqc.yml"
         
     shell:
-        "mkdir -p {params.outdir} &&"
+        "mkdir -p {params.outdir} && "
         "multiqc --config multiqc.yaml -o {params.outdir} -n multiqc.html {input} "
         ">{log} 2>&1"
 
+
+rule QC_table:
+    input:
+        config['output_dir']+"/multiqc/multiqc_data"
+    output:
+        config['output_dir']+"/multiqc/QC_table.csv"
+    shell:
+        "python DNA_QCtable.py -m {input} -o {output} "
